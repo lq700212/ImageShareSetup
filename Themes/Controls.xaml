@@ -476,6 +476,9 @@
     <Style TargetType="ListBox">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
+        <!-- ListBox 自带默认前景色（SystemColors.ControlTextBrush = 黑色），会盖掉
+             Window 继承下来的浅色文字，这里必须显式跟随主题，否则深色主题下列表文字看不清。 -->
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
         <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
         <Setter Property="Template">
@@ -491,6 +494,8 @@
 
     <!-- 磁盘卡片式列表项 -->
     <Style TargetType="ListBoxItem">
+        <!-- ListBoxItem 同样自带默认前景色，显式跟随主题 -->
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Margin" Value="0,0,0,8" />
@@ -521,6 +526,7 @@
 
     <!-- 紧凑行（清理预览列表用，无卡片边框） -->
     <Style x:Key="RowItem" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Template">
