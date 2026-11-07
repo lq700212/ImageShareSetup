@@ -1,0 +1,62 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        深色主题（galaxy 风格：深蓝底 + 靛蓝→紫渐变 + 1px 细描边）
+        所有键名与 Light.xaml 完全一致，ThemeManager 切换时整份替换。
+        新加颜色时务必两个文件同时加，否则切主题会找不到资源报错。
+    -->
+
+    <Color x:Key="WindowBgColor">#080C18</Color>
+    <Color x:Key="TitleBgColor">#0F1525</Color>
+    <Color x:Key="CardBgColor">#131A2C</Color>
+    <Color x:Key="CardBg2Color">#0E1423</Color>
+    <Color x:Key="InputBgColor">#0C1220</Color>
+    <Color x:Key="LineColor">#26324A</Color>
+    <Color x:Key="TextColor">#E9EEFA</Color>
+    <Color x:Key="SubTextColor">#8C98B2</Color>
+    <Color x:Key="HoverColor">#1F2941</Color>
+
+    <SolidColorBrush x:Key="WindowBgBrush" Color="{StaticResource WindowBgColor}" />
+    <SolidColorBrush x:Key="TitleBgBrush" Color="{StaticResource TitleBgColor}" />
+    <SolidColorBrush x:Key="CardBgBrush" Color="{StaticResource CardBgColor}" />
+    <SolidColorBrush x:Key="CardBg2Brush" Color="{StaticResource CardBg2Color}" />
+    <SolidColorBrush x:Key="InputBgBrush" Color="{StaticResource InputBgColor}" />
+    <SolidColorBrush x:Key="LineBrush" Color="{StaticResource LineColor}" />
+    <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}" />
+    <SolidColorBrush x:Key="SubTextBrush" Color="{StaticResource SubTextColor}" />
+    <SolidColorBrush x:Key="HoverBrush" Color="{StaticResource HoverColor}" />
+
+    <!-- 语义色：深浅主题通用（都够亮，不随主题变） -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#6366F1" />
+    <SolidColorBrush x:Key="Accent2Brush" Color="#8B5CF6" />
+    <SolidColorBrush x:Key="OkBrush" Color="#22C55E" />
+    <SolidColorBrush x:Key="WarnBrush" Color="#F59E0B" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#38BDF8" />
+
+    <SolidColorBrush x:Key="OnAccentBrush" Color="#FFFFFF" />
+
+    <LinearGradientBrush x:Key="AccentGradient" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#6366F1" Offset="0" />
+        <GradientStop Color="#8B5CF6" Offset="1" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="DangerGradient" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#EF4444" Offset="0" />
+        <GradientStop Color="#C82D5C" Offset="1" />
+    </LinearGradientBrush>
+
+    <LinearGradientBrush x:Key="OkGradient" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#22C55E" Offset="0" />
+        <GradientStop Color="#10A674" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- 禁用态 / 滚动条 / 选中盘 -->
+    <SolidColorBrush x:Key="DisabledBgBrush" Color="#242C3E" />
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#6B7590" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#3A4761" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#4E5D7D" />
+    <SolidColorBrush x:Key="DiskSelectedBgBrush" Color="#1B1E44" />
+
+</ResourceDictionary>

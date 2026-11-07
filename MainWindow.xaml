@@ -1,0 +1,912 @@
+<Window x:Class="ImageShareSetup.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="网络存图部署工具"
+        Icon="pack://application:,,,/Assets/app.ico"
+        Width="1180" Height="820" MinWidth="1040" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="CanResize"
+        Background="{DynamicResource WindowBgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+
+    <!--
+        网络存图部署工具（WPF 版）
+        ==================================================================
+        布局（ASCII 图，改界面时同步更新）：
+        ┌──────────────────────────────────────────────────────────────┐
+        │ [渐变logo] 网络存图部署工具           [浅色/深色] [—] [□] [×] │ 58px 自绘标题栏
+        ├──────────┬───────────────────────────────────────────────────┤
+        │ 步骤      │                                                   │
+        │ ▎① 目标机 │            四个页面（Grid 叠放切换 Visibility）     │
+        │   配置    │                                                   │
+        │ ② 源机连接│   页①磁盘/共享/账号/日志   页②连接检测六步         │
+        │ ③ 旧图清理│   页③日期目录预览/清理     页④部署说明/换盘SOP     │
+        │ ④ 使用说明│                                                   │
+        │          │                                                   │
+        │ [管理员]  │                                                   │
+        ├──────────┴───────────────────────────────────────────────────┤
+        │ ● 就绪                                  [管理员] v1.0.0       │ 40px 状态栏
+        └──────────────────────────────────────────────────────────────┘
+        交互点：
+          · 标题栏空白处可拖动，双击最大化；按钮区已设 IsHitTestVisibleInChrome
+          · 左侧 RadioButton(GroupName=Nav) 切页；-Tab N 启动参数直接定位
+          · 页①列表选中磁盘 → 底部"存图根目录"实时预览
+          · 页②每步状态由 TestStep.State 驱动颜色（Pending/Running/Ok/Warn/Fail）
+          · 页③扫描结果按 WillDelete 显示红色"将删除"/灰色"保留"
+    -->
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="58"
+                            ResizeBorderThickness="6"
+                            CornerRadius="0"
+                            GlassFrameThickness="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+
+        <!-- ================= 磁盘列表项 ================= -->
+        <DataTemplate x:Key="DiskTemplate">
+            <Grid Height="62" Margin="14,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="170" />
+                </Grid.ColumnDefinitions>
+
+                <Border Width="46" Height="44" CornerRadius="10"
+                        Background="{DynamicResource InputBgBrush}"
+                        BorderBrush="{DynamicResource LineBrush}"
+                        BorderThickness="1"
+                        VerticalAlignment="Center">
+                    <TextBlock Text="{Binding LetterText}"
+                               FontSize="16" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1" Margin="14,0,16,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding LabelText}" Style="{StaticResource H3}" />
+                    <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Muted}" Margin="0,4,0,0" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <ProgressBar Value="{Binding UsedRatio, Mode=OneWay}" Maximum="1" />
+                    <TextBlock Text="{Binding UsedPercentText}" Style="{StaticResource Muted}"
+                               HorizontalAlignment="Right" Margin="0,6,0,0" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- ================= 检测步骤行 ================= -->
+        <Style x:Key="StepItemStyle" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border Background="Transparent" MinHeight="56" Padding="4,6">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="StepTemplate">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="30" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Grid Width="22" Height="22" VerticalAlignment="Center">
+                    <Ellipse x:Name="dot" Fill="{DynamicResource LineBrush}" />
+                    <TextBlock x:Name="glyph" Text="" FontSize="12" FontWeight="Bold"
+                               Foreground="White"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Grid>
+
+                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Detail}" Style="{StaticResource Muted}" Margin="0,3,0,0" />
+                </StackPanel>
+            </Grid>
+
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding State}" Value="Running">
+                    <Setter TargetName="dot" Property="Fill" Value="{DynamicResource InfoBrush}" />
+                    <Setter TargetName="glyph" Property="Text" Value="…" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="Ok">
+                    <Setter TargetName="dot" Property="Fill" Value="{DynamicResource OkBrush}" />
+                    <Setter TargetName="glyph" Property="Text" Value="✓" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="Warn">
+                    <Setter TargetName="dot" Property="Fill" Value="{DynamicResource WarnBrush}" />
+                    <Setter TargetName="glyph" Property="Text" Value="!" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding State}" Value="Fail">
+                    <Setter TargetName="dot" Property="Fill" Value="{DynamicResource DangerBrush}" />
+                    <Setter TargetName="glyph" Property="Text" Value="×" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- ================= 清理预览行 ================= -->
+        <DataTemplate x:Key="CleanTemplate">
+            <Grid Height="38">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="116" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="96" />
+                    <ColumnDefinition Width="76" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="{Binding DateText}" Style="{StaticResource Mono}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12.5"
+                           Foreground="{DynamicResource SubTextBrush}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Text="{Binding SizeText}" Style="{StaticResource Mono}"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+
+                <Border x:Name="tag" Grid.Column="3" CornerRadius="5" Padding="7,2"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Background="{DynamicResource HoverBrush}">
+                    <TextBlock x:Name="lbl" Text="{Binding StatusText}" FontSize="11.5"
+                               Foreground="{DynamicResource SubTextBrush}" />
+                </Border>
+            </Grid>
+
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding WillDelete}" Value="True">
+                    <Setter TargetName="tag" Property="Background" Value="#22EF4444" />
+                    <Setter TargetName="lbl" Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="58" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="40" />
+        </Grid.RowDefinitions>
+
+        <!-- ==================== 标题栏 ==================== -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBgBrush}"
+                BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
+            <Grid Margin="18,0,10,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="34" Height="34" CornerRadius="10"
+                            Background="{DynamicResource AccentGradient}">
+                        <Path Data="M4,7 H20 V17 H4 Z M4,3.5 H20 M9,12 H15"
+                              Stroke="White" StrokeThickness="1.7"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stretch="Uniform" Margin="9" />
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="网络存图部署工具" FontSize="14.5" FontWeight="SemiBold" />
+                        <TextBlock Text="图片直写另一台工控机"
+                                   FontSize="10.5" Foreground="{DynamicResource SubTextBrush}" Margin="0,2,0,0" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="btnTheme" Style="{StaticResource SmallGhostButton}"
+                            Width="88" Height="30" Margin="0,0,10,0"
+                            Click="ToggleTheme_Click"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="切换深色/浅色主题（会记住选择）">
+                        <StackPanel Orientation="Horizontal">
+                            <Path x:Name="icoTheme" Style="{StaticResource IconPath}"
+                                  Width="13" Height="13"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M12,2 A10,10 0 1 0 12,22 A7,7 0 1 1 12,2 Z"
+                                  Stretch="Uniform" />
+                            <TextBlock x:Name="txtTheme" Text="浅色模式" FontSize="12" Margin="6,0,0,0" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button x:Name="btnMin" Style="{StaticResource CaptionButton}"
+                            Click="Min_Click"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="最小化">
+                        <Path Data="M5,12 H19" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Width="12" Height="12" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="btnMax" Style="{StaticResource CaptionButton}"
+                            Click="Max_Click"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="最大化 / 还原">
+                        <Path x:Name="icoMax" Data="M5,5 H19 V19 H5 Z"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.6" StrokeLineJoin="Round"
+                              Width="12" Height="12" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="btnClose" Style="{StaticResource CloseCaptionButton}"
+                            Click="Close_Click"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="关闭">
+                        <Path Data="M6,6 L18,18 M18,6 L6,18"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Width="12" Height="12" Stretch="Uniform" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ==================== 主体 ==================== -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="228" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧导航 -->
+            <Border Grid.Column="0" Background="{DynamicResource TitleBgBrush}"
+                    BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="14,18,14,12">
+
+                    <StackPanel DockPanel.Dock="Bottom">
+                        <Border Style="{StaticResource CardFlat}" Padding="12,10">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse x:Name="dotAdmin" Width="7" Height="7" Fill="{DynamicResource WarnBrush}"
+                                             VerticalAlignment="Center" />
+                                    <TextBlock x:Name="txtAdminState" Text="正在检查权限…"
+                                               FontSize="11.5" Margin="7,0,0,0"
+                                               Foreground="{DynamicResource SubTextBrush}" />
+                                </StackPanel>
+                                <Button x:Name="btnElevate2" Content="以管理员身份重启"
+                                        Style="{StaticResource SmallGhostButton}"
+                                        Height="28" FontSize="11.5" Margin="0,8,0,0"
+                                        Visibility="Collapsed"
+                                        Click="Elevate_Click" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Text="步骤" Style="{StaticResource FieldLabel}" Margin="8,0,0,10" />
+
+                        <RadioButton x:Name="nav0" Style="{StaticResource NavItem}" GroupName="Nav"
+                                     IsChecked="True" Tag="0" Checked="Nav_Checked"
+                                     ToolTip="第①页：在存图目标机上建共享（需要管理员）">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource IconPath}"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      Data="M3,4 H21 V10 H3 Z M3,14 H21 V20 H3 Z M6,7 H9 M6,17 H9 M17,7 H18 M17,17 H18" />
+                                <TextBlock Text="目标机配置" Margin="11,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton x:Name="nav1" Style="{StaticResource NavItem}" GroupName="Nav"
+                                     Tag="1" Checked="Nav_Checked"
+                                     ToolTip="第②页：在视觉机上测试连接并保存凭据">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource IconPath}"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      Data="M9.5,14.5 L14.5,9.5 M7,16.5 A3.2,3.2 0 0 1 7,12 L9.5,9.5 A3.2,3.2 0 0 1 14,9.5 M17,7.5 A3.2,3.2 0 0 1 17,12 L14.5,14.5 A3.2,3.2 0 0 1 10,14.5" />
+                                <TextBlock Text="源机连接测试" Margin="11,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton x:Name="nav2" Style="{StaticResource NavItem}" GroupName="Nav"
+                                     Tag="2" Checked="Nav_Checked"
+                                     ToolTip="第③页：按日期目录清理旧图（默认只预览）">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource IconPath}"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      Data="M4,7 H20 M9,7 V4.5 H15 V7 M6,7 L7,20 H17 L18,7 M10,10.5 V16.5 M14,10.5 V16.5" />
+                                <TextBlock Text="旧图清理" Margin="11,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <RadioButton x:Name="nav3" Style="{StaticResource NavItem}" GroupName="Nav"
+                                     Tag="3" Checked="Nav_Checked"
+                                     ToolTip="第④页：部署流程、换盘 SOP、常见问题">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource IconPath}"
+                                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                      Data="M5,4 H19 V20 H5 Z M9,4 V20 M9,8.5 H15 M9,12.5 H15 M9,16.5 H13" />
+                                <TextBlock Text="使用说明" Margin="11,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </RadioButton>
+
+                        <Separator Margin="4,14,4,10" />
+
+                        <TextBlock Text="当前路径"
+                                   Style="{StaticResource FieldLabel}" Margin="8,0,0,6" />
+                        <TextBlock x:Name="txtNavHint" Text="目标机：配置共享"
+                                   Style="{StaticResource Muted}" Margin="8,0,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- 右侧页面容器 -->
+            <Grid Grid.Column="1">
+
+                <!-- ============================================================ -->
+                <!-- 页① 目标机配置                                                -->
+                <!-- ============================================================ -->
+                <Grid x:Name="page0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="26,20,18,24">
+                        <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+
+                            <TextBlock Text="目标机配置" Style="{StaticResource H1}" />
+                            <TextBlock Text="在存放图片的那台工控机上运行。第一次配置、或者换了数据盘之后使用。"
+                                       Style="{StaticResource Muted}" Margin="0,6,0,0" />
+
+                            <!-- 非管理员提示 -->
+                            <Border x:Name="bannerAdmin" Margin="0,16,0,0" CornerRadius="10" Padding="14,12"
+                                    Background="#1AF59E0B" BorderBrush="#59F59E0B" BorderThickness="1"
+                                    Visibility="Collapsed">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="当前不是管理员权限" FontWeight="SemiBold" FontSize="13" />
+                                        <TextBlock Text="建共享、改盘符、设 NTFS 权限都需要管理员权限。点右侧按钮重启（会弹 UAC 确认）。"
+                                                   Style="{StaticResource Muted}" Margin="0,3,0,0" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="以管理员身份重启"
+                                            Style="{StaticResource SmallGhostButton}"
+                                            Margin="14,0,0,0" VerticalAlignment="Center"
+                                            Click="Elevate_Click" />
+                                </Grid>
+                            </Border>
+
+                            <!-- ① 磁盘 -->
+                            <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <Grid>
+                                        <StackPanel>
+                                            <TextBlock Text="① 选择存图磁盘" Style="{StaticResource H2}" />
+                                            <TextBlock Text="图片会写到这块盘的 VisionImages 目录。建议选数据盘（卷标 VISION_DATA）。"
+                                                       Style="{StaticResource Muted}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="btnRefreshDisks" Content="刷新磁盘列表" Style="{StaticResource SmallGhostButton}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                Click="RefreshDisks_Click" />
+                                    </Grid>
+
+                                    <ListBox x:Name="lbDisks" Margin="0,14,0,0" MaxHeight="250"
+                                             ItemTemplate="{StaticResource DiskTemplate}"
+                                             SelectionChanged="Disks_SelectionChanged" />
+
+                                    <TextBlock x:Name="txtNoDisk" Text="没有检测到可用的非系统 NTFS 固定磁盘。"
+                                               Style="{StaticResource Muted}" Margin="0,12,0,0" Visibility="Collapsed" />
+                                    <TextBlock Text="如果这里是空的：先在「磁盘管理」把新硬盘初始化、格式化 NTFS 并分配盘符，再回来刷新。"
+                                               Style="{StaticResource Muted}" Margin="0,10,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ② 共享与账号 -->
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="② 共享与账号" Style="{StaticResource H2}" />
+                                    <TextBlock Text="源机只认共享名、不认盘符。换盘时共享名保持不变，源机配置一个字都不用改。"
+                                               Style="{StaticResource Muted}" Margin="0,4,0,0" />
+
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="共享名" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtShareName" Text="VisionImages"
+                                                     ToolTip="源机访问时用的名字，例如 \\192.168.10.50\VisionImages。建议保持默认；改了这个，源机也要跟着改。" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="专用账号" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtUser" Text="visionshare"
+                                                     ToolTip="只在目标机本地创建的账号，只给存图目录的读写权限。不要用 Administrator，也不要用你自己的域账号。" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="密码" Style="{StaticResource FieldLabel}" />
+                                            <Grid>
+                                                <PasswordBox x:Name="pwdBox"
+                                                             ToolTip="专用账号的密码。首次配置可随机生成；配置完成后会写进目标机的「连接信息.txt」，带到源机填一次即可。" />
+                                                <TextBox x:Name="txtPwdPlain" Visibility="Collapsed"
+                                                         ToolTip="密码明文（仅在点“眼睛”时显示）" />
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                                            VerticalAlignment="Center" Margin="0,0,3,0">
+                                                    <Button x:Name="btnEye" Style="{StaticResource IconButton}"
+                                                            Click="TogglePassword_Click" ToolTip="显示 / 隐藏密码">
+                                                        <Path Data="M2,12 C5,7.2 8.6,5 12,5 C15.4,5 19,7.2 22,12 C19,16.8 15.4,19 12,19 C8.6,19 5,16.8 2,12 Z M12,9 A3,3 0 1 1 12,15 A3,3 0 1 1 12,9"
+                                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                              StrokeThickness="1.5" Width="16" Height="16"
+                                                              Stretch="Uniform" />
+                                                    </Button>
+                                                    <Button x:Name="btnRandomPwd" Style="{StaticResource IconButton}"
+                                                            Click="RandomPassword_Click" ToolTip="随机生成 14 位强密码">
+                                                        <Path Data="M4,4 H20 V20 H4 Z M8,8 L8.01,8 M16,8 L16.01,8 M12,12 L12.01,12 M8,16 L8.01,16 M16,16 L16.01,16"
+                                                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                              StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                              Width="15" Height="15" Stretch="Uniform" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock Text="首次配置可随机生成；配置完把「连接信息.txt」带到源机。"
+                                                       Style="{StaticResource Muted}" Margin="2,6,0,0" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="数据盘卷标（换盘认盘用）" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtVolumeLabel" Text="VISION_DATA"
+                                                     ToolTip="新数据盘格式化成这个卷标，换盘后脚本一跑就自动认出它。当前盘卷标不一致也能用，只是换盘时需要手动选一下盘符。" />
+                                            <TextBlock Text="换盘不影响共享名：源机认的是共享，不是盘符。"
+                                                       Style="{StaticResource Muted}" Margin="2,6,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- ③ 执行 -->
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="③ 开始配置" Style="{StaticResource H2}" />
+                                    <TextBlock Text="程序会：建目录 → 建专用账号 → 设 NTFS 权限 → 建 SMB 共享 → 放行防火墙 445 → 写测试文件。"
+                                               Style="{StaticResource Muted}" Margin="0,4,0,0" />
+
+                                    <Border Style="{StaticResource CardFlat}" Margin="0,14,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="存图根目录" Style="{StaticResource FieldLabel}"
+                                                       Margin="0" VerticalAlignment="Center" />
+                                            <TextBox Grid.Column="1" x:Name="txtRootPreview" IsReadOnly="True"
+                                                     Height="32" Margin="14,0,0,0" BorderThickness="0"
+                                                     Background="Transparent" FontFamily="Consolas, Microsoft YaHei UI"
+                                                     Text="D:\VisionImages" />
+                                        </Grid>
+                                    </Border>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <CheckBox x:Name="chkDisableHibernate"
+                                                  Content="同时关闭系统休眠（释放几 GB 空间）"
+                                                  ToolTip="执行 powercfg /h off。目标机是长期开机的存图机，休眠没用，关掉还能腾出和内存一样大的 hiberfil.sys。" />
+                                        <CheckBox x:Name="chkRecursiveAcl"
+                                                  Content="递归修复已有图片的权限"
+                                                  Margin="26,0,0,0"
+                                                  ToolTip="首次配置不需要勾。换盘/迁移过老图、老图打不开时勾选，会给目录下所有文件重设 ACL（文件多时较慢）。" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                        <Button x:Name="btnSetup" Content="开始配置共享"
+                                                Style="{StaticResource PrimaryButton}" Width="164"
+                                                Click="Setup_Click" />
+                                        <Button x:Name="btnRepair" Content="换盘后一键修复"
+                                                Style="{StaticResource GhostButton}" Width="152" Margin="10,0,0,0"
+                                                Click="Repair_Click"
+                                                ToolTip="换硬盘、盘符变了、共享失效时跑这个：只修复，不改密码、不重建账号。" />
+                                        <Button x:Name="btnCancelSetup" Content="停止"
+                                                Style="{StaticResource GhostButton}" Width="80" Margin="10,0,0,0"
+                                                Visibility="Collapsed" Click="CancelSetup_Click" />
+                                    </StackPanel>
+
+                                    <TextBox x:Name="txtSetupLog" Style="{StaticResource LogBox}" Height="212"
+                                             Margin="0,14,0,0"
+                                             ToolTip="脚本实时输出。执行完成后先看最后的「结果」段，再按提示到源机配置。" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 成功结果 -->
+                            <Border x:Name="cardShareResult" Style="{StaticResource Card}"
+                                    Margin="0,14,0,0" BorderBrush="{DynamicResource OkBrush}"
+                                    Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="共享已就绪，下一步去源机" Style="{StaticResource H2}"
+                                               Foreground="{DynamicResource OkBrush}" />
+                                    <TextBlock Text="到拍照/存图的那台视觉机上打开本工具 → 第②页，填下面的信息检测一遍。"
+                                               Style="{StaticResource Muted}" Margin="0,5,0,0" />
+                                    <StackPanel x:Name="spSharePaths" Margin="0,12,0,0" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                        <Button Content="复制共享路径" Style="{StaticResource SmallGhostButton}"
+                                                Click="CopySharePath_Click" />
+                                        <Button Content="去源机连接测试" Style="{StaticResource SmallGhostButton}"
+                                                Margin="8,0,0,0" Click="GoConnect_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ============================================================ -->
+                <!-- 页② 源机连接测试                                              -->
+                <!-- ============================================================ -->
+                <Grid x:Name="page1" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="26,20,18,24">
+                        <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+
+                            <TextBlock Text="源机连接测试" Style="{StaticResource H1}" />
+                            <TextBlock Text="在拍照/存图的那台视觉机上运行，确认能写进目标机硬盘。"
+                                       Style="{StaticResource Muted}" Margin="0,6,0,0" />
+
+                            <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="目标机信息" Style="{StaticResource H2}" />
+                                    <TextBlock Text="信息来自目标机生成的「连接信息.txt」。密码只在这里用一次，保存进 Windows 凭据管理器。"
+                                               Style="{StaticResource Muted}" Margin="0,4,0,0" />
+
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="目标机 IP / 主机名" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtServer"
+                                                     ToolTip="存图目标机的 IP，例如 192.168.10.50。也接受完整 UNC（\\192.168.10.50\VisionImages），程序会自动拆分。" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="共享名" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtShare" Text="VisionImages"
+                                                     ToolTip="目标机建共享时用的名字，默认 VisionImages。" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="账号" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtUser2" Text="visionshare"
+                                                     ToolTip="目标机上的专用账号，默认 visionshare。" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="密码" Style="{StaticResource FieldLabel}" />
+                                            <Grid>
+                                                <PasswordBox x:Name="pwdBox2"
+                                                             ToolTip="专用账号的密码，见目标机的「连接信息.txt」。" />
+                                                <TextBox x:Name="txtPwdPlain2" Visibility="Collapsed" />
+                                                <Button x:Name="btnEye2" Style="{StaticResource IconButton}"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                        Margin="0,0,3,0" Click="TogglePassword2_Click"
+                                                        ToolTip="显示 / 隐藏密码">
+                                                    <Path Data="M2,12 C5,7.2 8.6,5 12,5 C15.4,5 19,7.2 22,12 C19,16.8 15.4,19 12,19 C8.6,19 5,16.8 2,12 Z M12,9 A3,3 0 1 1 12,15 A3,3 0 1 1 12,9"
+                                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                                          StrokeThickness="1.5" Width="16" Height="16" Stretch="Uniform" />
+                                                </Button>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+                                        <Button x:Name="btnTest" Content="开始检测"
+                                                Style="{StaticResource PrimaryButton}" Width="140"
+                                                Click="Test_Click" />
+                                        <Button x:Name="btnStopTest" Content="停止"
+                                                Style="{StaticResource GhostButton}" Width="72" Margin="8,0,0,0"
+                                                Visibility="Collapsed" Click="StopTest_Click" />
+                                        <Button Content="清理本机凭据" Style="{StaticResource GhostButton}"
+                                                Width="128" Margin="10,0,0,0" Click="ClearCred_Click"
+                                                ToolTip="删除本机为这个目标机保存的 Windows 凭据（换密码/换机器时用）。" />
+                                        <Button Content="打开共享" Style="{StaticResource GhostButton}"
+                                                Width="100" Margin="10,0,0,0" Click="OpenUnc_Click"
+                                                ToolTip="用资源管理器打开共享目录，直观确认能不能进。" />
+                                        <TextBlock x:Name="txtTestStatus" Style="{StaticResource Muted}"
+                                                   VerticalAlignment="Center" Margin="14,0,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="cardTestResult" Style="{StaticResource Card}"
+                                    Margin="0,14,0,0" Visibility="Collapsed">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border x:Name="testResultIcon" Width="38" Height="38" CornerRadius="10"
+                                                Background="{DynamicResource OkGradient}">
+                                            <TextBlock x:Name="txtTestIcon" Text="✓" FontSize="19" Foreground="White"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <StackPanel Margin="13,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock x:Name="txtTestTitle" Text="连接正常" Style="{StaticResource H2}" />
+                                            <TextBlock x:Name="txtTestMessage" Style="{StaticResource Muted}"
+                                                       Margin="0,3,0,0" MaxWidth="720" />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <Border Style="{StaticResource CardFlat}" Margin="0,14,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="存图软件「图像保存设定」里填这个路径"
+                                                           Style="{StaticResource Muted}" />
+                                                <TextBlock x:Name="txtUncPath" Style="{StaticResource Mono}"
+                                                           FontSize="14" Margin="0,6,0,0" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                        VerticalAlignment="Center" Margin="14,0,0,0">
+                                                <Button Content="复制" Style="{StaticResource SmallGhostButton}"
+                                                        Click="CopyUnc_Click" />
+                                                <Button Content="打开" Style="{StaticResource SmallGhostButton}"
+                                                        Margin="8,0,0,0" Click="OpenUnc_Click" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Text="注意：存图软件如果以管理员身份运行，本工具也要用管理员身份运行，否则凭据不在同一个 Windows 账号下。"
+                                               Style="{StaticResource Muted}" Margin="0,12,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="检测流程（明细）" Style="{StaticResource H2}" />
+                                    <TextBlock Text="六步全绿才算通。任何一步红了，上方结果卡会给出具体原因和排查建议。"
+                                               Style="{StaticResource Muted}" Margin="0,4,0,0" />
+                                    <ListBox x:Name="lstSteps" Margin="0,10,0,0"
+                                             ItemTemplate="{StaticResource StepTemplate}"
+                                             ItemContainerStyle="{StaticResource StepItemStyle}" />
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ============================================================ -->
+                <!-- 页③ 旧图清理                                                  -->
+                <!-- ============================================================ -->
+                <Grid x:Name="page2" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="26,20,18,24">
+                        <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+
+                            <TextBlock Text="旧图清理" Style="{StaticResource H1}" />
+                            <TextBlock Text="只删除名字严格是 8 位日期（yyyyMMdd）且超过保留天数的目录，其它文件一律不碰。"
+                                       Style="{StaticResource Muted}" Margin="0,6,0,0" />
+
+                            <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="清理范围" Style="{StaticResource H2}" />
+
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="14" />
+                                            <ColumnDefinition Width="120" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="存图根目录（UNC 或本地路径）" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtCleanRoot"
+                                                     ToolTip="例如 \\192.168.10.50\VisionImages 或 D:\VisionImages。填存图根目录，不要填到相机/OK/NG 子目录。" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="保留天数" Style="{StaticResource FieldLabel}" />
+                                            <TextBox x:Name="txtDays" Text="30"
+                                                     ToolTip="早于「今天 - 保留天数」的日期目录会被删除。默认 30 天。" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                        <Button x:Name="btnScan" Content="扫描预览"
+                                                Style="{StaticResource PrimaryButton}" Width="130"
+                                                Click="Scan_Click" />
+                                        <Button x:Name="btnClean" Content="执行清理"
+                                                Style="{StaticResource DangerButton}" Width="120"
+                                                Margin="10,0,0,0" IsEnabled="False"
+                                                Click="Clean_Click"
+                                                ToolTip="只删除列表里标红「将删除」的日期目录。执行前会再确认一次。" />
+                                        <TextBlock x:Name="txtCleanStatus" Style="{StaticResource Muted}"
+                                                   VerticalAlignment="Center" Margin="14,0,0,0" />
+                                    </StackPanel>
+
+                                    <TextBlock Text="提示：在目标机本地运行脚本（Run-CleanOld.cmd）速度更快，不受网络影响。UNC 路径清理时请确保网络稳定。"
+                                               Style="{StaticResource Muted}" Margin="0,12,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <Grid>
+                                        <TextBlock Text="扫描结果" Style="{StaticResource H2}" />
+                                        <TextBlock x:Name="txtCleanSummary" Style="{StaticResource Muted}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,12,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="116" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="96" />
+                                            <ColumnDefinition Width="76" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="日期" Style="{StaticResource FieldLabel}" Margin="0" />
+                                        <TextBlock Grid.Column="1" Text="目录" Style="{StaticResource FieldLabel}" Margin="0" />
+                                        <TextBlock Grid.Column="2" Text="占用" Style="{StaticResource FieldLabel}"
+                                                   Margin="0" HorizontalAlignment="Right" />
+                                        <TextBlock Grid.Column="3" Text="状态" Style="{StaticResource FieldLabel}"
+                                                   Margin="0" HorizontalAlignment="Right" />
+                                    </Grid>
+
+                                    <ListBox x:Name="lbCleanItems" MaxHeight="380"
+                                             ItemContainerStyle="{StaticResource RowItem}"
+                                             ItemTemplate="{StaticResource CleanTemplate}" />
+
+                                    <TextBlock x:Name="txtCleanEmpty" Text="点「扫描预览」查看哪些目录会被清理。"
+                                               Style="{StaticResource Muted}" Margin="0,10,0,4" />
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ============================================================ -->
+                <!-- 页④ 使用说明                                                  -->
+                <!-- ============================================================ -->
+                <Grid x:Name="page3" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="26,20,18,24">
+                        <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+
+                            <TextBlock Text="使用说明" Style="{StaticResource H1}" />
+                            <TextBlock Text="三步完成部署；换硬盘只需在目标机跑一次修复，源机不用动。"
+                                       Style="{StaticResource Muted}" Margin="0,6,0,0" />
+
+                            <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="部署流程" Style="{StaticResource H2}" />
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Grid.Column="0" Style="{StaticResource CardFlat}">
+                                            <StackPanel>
+                                                <TextBlock Text="① 目标机配置" Style="{StaticResource H3}" />
+                                                <TextBlock Text="在存图机上以管理员运行本工具，选数据盘，点「开始配置共享」。完成后记下共享路径和账号密码。"
+                                                           Style="{StaticResource Muted}" Margin="0,6,0,0" LineHeight="19" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Grid.Column="1" Text="→" FontSize="18"
+                                                   Foreground="{DynamicResource SubTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                        <Border Grid.Column="2" Style="{StaticResource CardFlat}">
+                                            <StackPanel>
+                                                <TextBlock Text="② 源机连接测试" Style="{StaticResource H3}" />
+                                                <TextBlock Text="在视觉机上填 IP / 账号 / 密码，点「开始检测」。六步全绿后复制 UNC 路径。"
+                                                           Style="{StaticResource Muted}" Margin="0,6,0,0" LineHeight="19" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Grid.Column="3" Text="→" FontSize="18"
+                                                   Foreground="{DynamicResource SubTextBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                        <Border Grid.Column="4" Style="{StaticResource CardFlat}">
+                                            <StackPanel>
+                                                <TextBlock Text="③ 填进存图软件" Style="{StaticResource H3}" />
+                                                <TextBlock Text="每个相机的「图像保存设定」填同一个 UNC 路径。不要用映射盘符（Z:），UNC 重启不掉。"
+                                                           Style="{StaticResource Muted}" Margin="0,6,0,0" LineHeight="19" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="换硬盘 SOP（客户换盘时照着做）" Style="{StaticResource H2}" />
+                                    <TextBlock Style="{StaticResource Muted}" Margin="0,10,0,0" LineHeight="23"
+                                               Text="1. 目标机关机，装上新硬盘，开机进「磁盘管理」初始化并格式化为 NTFS，卷标设成 VISION_DATA。&#10;2. 在目标机运行本工具 → 第①页 → 刷新磁盘 → 选中新盘 → 点「换盘后一键修复」。&#10;3. 脚本会把共享重新指向新盘的 VisionImages 目录；共享名不变，源机路径不变。&#10;4. 到源机第②页点一次「开始检测」，六步全绿即可继续生产。&#10;5. 旧盘不要当场格式化，保留至少一周作为回滚备份。" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="常见问题" Style="{StaticResource H2}" />
+
+                                    <TextBlock Text="· 源机能 ping 通，但检测第一步就红？" FontWeight="SemiBold" Margin="0,12,0,0" />
+                                    <TextBlock Text="  目标机防火墙没放行 445。回目标机重跑 Run-Repair.cmd，或手动在防火墙里放行「文件和打印机共享」。"
+                                               Style="{StaticResource Muted}" Margin="0,3,0,0" />
+
+                                    <TextBlock Text="· 能进共享，但存图软件写不进去？" FontWeight="SemiBold" Margin="0,10,0,0" />
+                                    <TextBlock Text="  多半是存图软件以管理员运行、而凭据是用普通权限保存的。两者用同一个账号/权限运行本工具再检测一次。"
+                                               Style="{StaticResource Muted}" Margin="0,3,0,0" />
+
+                                    <TextBlock Text="· 客户把硬盘拔了换新的，共享没了？" FontWeight="SemiBold" Margin="0,10,0,0" />
+                                    <TextBlock Text="  按上面「换硬盘 SOP」跑一次修复即可。源机不用改任何配置。"
+                                               Style="{StaticResource Muted}" Margin="0,3,0,0" />
+
+                                    <TextBlock Text="· 磁盘满了，旧图怎么清？" FontWeight="SemiBold" Margin="0,10,0,0" />
+                                    <TextBlock Text="  本工具第③页先扫描预览，再执行清理；也可以直接在目标机双击 Run-CleanOld.cmd。只删 8 位日期目录。"
+                                               Style="{StaticResource Muted}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="命令行脚本（不开界面也能用）" Style="{StaticResource H2}" />
+                                    <TextBlock Text="Scripts 目录里的 ps1 / cmd 与界面功能完全一致，适合远程桌面/批处理/计划任务。"
+                                               Style="{StaticResource Muted}" Margin="0,4,0,0" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                        <Button Content="打开脚本目录" Style="{StaticResource SmallGhostButton}"
+                                                Click="OpenScripts_Click" />
+                                        <Button Content="打开 README" Style="{StaticResource SmallGhostButton}"
+                                                Margin="8,0,0,0" Click="OpenReadme_Click" />
+                                        <Button Content="打开日志目录" Style="{StaticResource SmallGhostButton}"
+                                                Margin="8,0,0,0" Click="OpenTemp_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+            </Grid>
+        </Grid>
+
+        <!-- ==================== 状态栏 ==================== -->
+        <Border Grid.Row="2" Background="{DynamicResource TitleBgBrush}"
+                BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
+            <Grid Margin="18,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="dotBusy" Width="7" Height="7" Fill="{DynamicResource OkBrush}"
+                             VerticalAlignment="Center" />
+                    <TextBlock x:Name="txtStatus" Text="就绪" FontSize="12"
+                               Foreground="{DynamicResource SubTextBrush}" Margin="8,0,0,0" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock x:Name="txtVersion" FontSize="11.5"
+                               Foreground="{DynamicResource SubTextBrush}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+    </Grid>
+</Window>

@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    网络存图部署工具（WPF 版）
+    ==================================================================
+    · 目标框架 net472：现场工控机是 Windows 10/11 自带 .NET Framework，
+      不需要装 .NET 6/8 运行时；单 exe 拷过去就能跑。
+    · UseWPF：界面全部 XAML + 矢量绘制，缩放不糊、圆角/渐变由 GPU 合成。
+    · 脚本以 EmbeddedResource 内嵌（见下方 ItemGroup），exe 自带脚本，
+      现场只拷一个 exe 即可；Scripts 目录下的 ps1 仍然是可直接双击运行的现场版。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>ImageShareSetup</RootNamespace>
+    <AssemblyName>ImageShareSetup</AssemblyName>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>7.3</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AssemblyTitle>网络存图部署工具</AssemblyTitle>
+    <Product>Image Share Setup</Product>
+    <Company>ImageShareSetup</Company>
+    <Description>把相机图片保存到另一台工控机的机械硬盘：一键配置 SMB 共享、连接检测、旧图清理</Description>
+    <Copyright>Copyright © ImageShareSetup</Copyright>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      应用图标（按 WPF 规范放 Assets）：
+        · app.ico 同时作为 exe 的 Win32 图标（ApplicationIcon）和窗口/任务栏图标（Window.Icon）；
+        · app.png 是 800x800 原图，留给界面品牌展示/以后做关于页，不参与编译逻辑。
+      注意：ico 必须包含多尺寸（16/24/32/48/64/128/256），只放 256 单尺寸时任务栏小图标会糊。
+    -->
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      内嵌脚本：直接引用 Scripts 目录下的同一份文件，不做副本（避免两处漂移）。
+      LogicalName 固定成纯 ASCII：资源名默认由路径推导，中文/短横线在不同 SDK 版本下
+      表现不一致，固定名最稳。
+    -->
+    <EmbeddedResource Include="Scripts\Setup-ImageShare.ps1" LogicalName="ImageShareSetup.Scripts.Setup-ImageShare.ps1" />
+    <EmbeddedResource Include="Scripts\Connect-ImageShare.ps1" LogicalName="ImageShareSetup.Scripts.Connect-ImageShare.ps1" />
+    <EmbeddedResource Include="Scripts\Clear-OldImages.ps1" LogicalName="ImageShareSetup.Scripts.Clear-OldImages.ps1" />
+  </ItemGroup>
+
+</Project>
